@@ -43,3 +43,7 @@ interface scan YOUR_INTERFACE
 ```
 
 This will scan and send you a list of networks splitted by newline
+
+## How to connect automatically?
+
+When started, UzbekNetwork automatically reads file `/etc/uzbeknetwork.autostart`. Just throw bunch of commands in this file.

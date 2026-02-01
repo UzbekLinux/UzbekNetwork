@@ -2,6 +2,56 @@
 import os
 import subprocess
 
+def command(command):
+    if command == "ping":
+        return "pong"
+    elif command == "list interfaces":
+        return " ".join(interfaces)
+    elif command == "list interfaces up":
+        tooutput = []
+        for i in interfaces:
+            j = open(f"/sys/class/net/{i}/operstate")
+            if j.read().strip() == "up":
+                tooutput.append(i)
+        return " ".join(tooutput)
+    elif command.startswith("interface"):
+        a = command.split(" ")
+        if a[2] == "wake":
+            if a[1].startswith("e") and a[1] in interfaces:
+                print(f"{a[1]} setting state up")
+                subprocess.run(["ip", "link", "set", a[1], "up"])
+                print(f"{a[1]} get network ip by dhcp")
+                subprocess.run(["dhcpcd", a[1]])
+                return "ok"
+            elif a[1].startswith("w") and a[1] in interfaces:
+                print(f"{a[1]} setting state up")
+                subprocess.run(["ip", "link", "set", a[1], "up"])
+                print(f"{a[1]} disable rfkill")
+                subprocess.run(["rfkill", "unblock", "wifi"])
+                print(f"{a[1]} create config")
+                try:
+                    result = subprocess.run(["wpa_passphrase", a[3], a[4]],
+                    capture_output=True,
+                    text=True,
+                    check=True)
+                except:
+                    result = subprocess.run(["wpa_passphrase", a[3]],
+                    capture_output=True,
+                    text=True,
+                    check=True)
+                file = open(f"/etc/{a[1]}_unet.conf", "w")
+                file.write(result.stdout)
+                file.close()
+                subprocess.run(["wpa_supplicant", "-B", "-i", a[1], "-c", f"/etc/{a[1]}_unet.conf"])
+                subprocess.run(["dhcpcd", "-w", a[1]])
+                return "ok"
+            elif a[2] in interfaces:
+                return "available, not supported"
+            else:
+                return "not exist"
+        elif a[1] == "scan" and a[2].startswith("w"):
+            return "\n".join(scanwifi(a[2]))
+
 def scanwifi(iface):
     result = subprocess.run(["iw", "dev", iface, "scan"],
                             capture_output=True,
@@ -37,6 +87,15 @@ if not os.path.exists(FIFOout):
     os.mkfifo(FIFOout)
 print(f"FIFO output created at {FIFOout}")
 
+print(f"running autorun commands...")
+try:
+    for i in open("/etc/uzbeknetwork.autostart").read().split("\n"):
+        print(command(i))
+    print("autorun command list end")
+except:
+    print("no autorun file, skipping...")
+
+print("now polling fifo")
 while True:
     with open(FIFOin, "r") as fifo_in, open(FIFOout, "w") as fifo_out:
         for line in fifo_in:
@@ -46,46 +105,5 @@ while True:
                 continue
 
             print(f"received line: {line}")
-            if line == "ping":
-                fifo_out.write("pong\n")
-            elif line == "list interfaces":
-                fifo_out.write(" ".join(interfaces) + "\n")
-            elif line == "list interfaces up":
-                tooutput = []
-                for i in interfaces:
-                    j = open(f"/sys/class/net/{i}/operstate")
-                    if j.read().strip() == "up":
-                        tooutput.append(i)
-                    fifo_out.write(" ".join(tooutput) + "\n")
-            elif line.startswith("interface"):
-                a = line.split(" ")
-                if a[1] == "wake":
-                    if a[2].startswith("e") and a[2] in interfaces:
-                        print(f"{a[1]} setting state up")
-                        subprocess.run(["ip", "link", "set", a[2], "up"])
-                        print(f"{a[1]} get network ip by dhcp")
-                        subprocess.run(["dhcpcd", a[2]])
-                        fifo_out.write("ok")
-                    elif a[2].startswith("w") and a[2] in interfaces:
-                        print(f"{a[1]} setting state up")
-                        subprocess.run(["ip", "link", "set", a[2], "up"])
-                        print(f"{a[1]} disable rfkill")
-                        subprocess.run(["rfkill", "unblock", "wifi"])
-                        print(f"{a[1]} create config")
-                        result = subprocess.run(["wpa_passphrase", a[3], a[4]],
-                        capture_output=True,
-                        text=True,
-                        check=True)
-                        file = open(f"/etc/{a[1]}_unet.conf", "w")
-                        file.write(result.stdout)
-                        file.close()
-                        subprocess.run(["wpa_supplicant", "-B", "-i", a[2], "-c", f"/etc/{a[1]}_unet.conf"])
-                        subprocess.run(["dhcpcd", "-w", a[2]])
-                        fifo_out.write("ok")
-                    elif a[2] in interfaces:
-                        fifo_out.write("available, not supported")
-                    else:
-                        fifo_out.write("not exist")
-                elif a[1] == "scan" and a[2].startswith("w"):
-                    fifo_out.write("\n".join(scanwifi(a[2])) + "\n")
-            fifo_out.flush()
+            fifo_out.write(command(line) + "\n")
+        fifo_out.flush()
